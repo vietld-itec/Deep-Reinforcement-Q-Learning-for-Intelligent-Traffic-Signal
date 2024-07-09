@@ -391,6 +391,9 @@ class SumoEnv:
         flow = {}
 
         for rou in self.route_net:
+            if len(self.route_net[rou]) <= 1:
+                print(f"Skipping route {rou} due to insufficient length: {self.route_net[rou]}")
+                continue
             if self.route_net[rou][0] not in flow:
                 flow[self.route_net[rou][0]] = {"out": {}, "con": 0, "lam": 0., "pro": 0., "veh": 0}
             if self.route_net[rou][1] not in flow[self.route_net[rou][0]]["out"]:
