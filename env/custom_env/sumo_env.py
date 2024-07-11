@@ -6,12 +6,14 @@ from .utils import \
     SUMO_PARAMS
 
 import sys
+import os
 import json
 import random
 import numpy as np
+import xml.etree.ElementTree as ET
 from itertools import permutations
 
-SUMO_HOME = "./venv/sumo/"
+SUMO_HOME = "/home/vietle/installers/venv/sumo/"
 
 sys.path.append(SUMO_HOME + 'tools')
 
@@ -46,6 +48,7 @@ class SumoEnv:
         self.data_dir = self.SUMO_ENV + "data/" + self.config + "/"
 
         self.net = net.readNet(self.data_dir + self.config + ".net.xml")
+        self.rou_xml_file = self.data_dir + self.config + ".rou.xml"
         self.tl_ids = [tl.getID() for tl in self.net.getTrafficLights()]
 
         self.tl_net = self.gen_tl_net()
@@ -60,7 +63,7 @@ class SumoEnv:
         exit()
         """
 
-        self.generate_route_file(gen=False)
+        #self.generate_route_file(gen=False)
         traci.start(self.set_params())
 
         self.tl_logic = self.gen_tl_logic()
@@ -124,7 +127,7 @@ class SumoEnv:
     ####################################################################################################################
 
     def start(self):
-        self.generate_route_file()
+        #self.generate_route_file()
         traci.start(self.params)
 
     def stop(self):
@@ -386,7 +389,6 @@ class SumoEnv:
                 (self.net.getNode(on).getOutgoing()[0], self.net.getNode(dn).getIncoming()[0]) for (on, dn) in
                 list(permutations([n for n in [node.getID() for node in self.net.getNodes()] if n not in self.tl_ids], 2))
                 ]]}
-
     def gen_flow_logic(self):
         flow = {}
 
@@ -430,6 +432,49 @@ class SumoEnv:
     def lambda_veh_p_second(self, veh_p_s):
         return 1 / veh_p_s
     """
+    def read_rou_xml(self):
+        flows = []
+        try:
+            tree = ET.parse(self.rou_xml_file)
+            root = tree.getroot()
+            
+            for flow in root.iter('flow'):
+                flow_id = flow.get('id')
+                flow_from = flow.get('from')
+                flow_to = flow.get('to')
+                vehs_per_hour = float(flow.get('vehsPerHour', default=0))
+                
+                flows.append({
+                    'id': flow_id,
+                    'from': flow_from,
+                    'to': flow_to,
+                    'vehsPerHour': vehs_per_hour
+                })
+        
+        except FileNotFoundError:
+            print(f"Error: File '{self.rou_xml_file}' not found.")
+        except Exception as e:
+            print(f"Error reading '{self.rou_xml_file}': {e}")
+        
+        return flows
+    def extract_vehs_per_hour(self):
+        if not os.path.exists(self.rou_xml_file):
+            raise FileNotFoundError(f"File '{self.rou_xml_file}' not found.")
+        
+        vehs_per_hour = {}
+        try:
+            tree = ET.parse(self.rou_xml_file)
+            root = tree.getroot()
+
+            for flow in root.iter('flow'):
+                flow_id = flow.get('id')
+                vehs_per_hour_value = float(flow.get('vehsPerHour', '0'))
+                vehs_per_hour[flow_id] = vehs_per_hour_value
+
+        except ET.ParseError as e:
+            print(f"Error parsing XML: {e}")
+        
+        return vehs_per_hour
 
     def lambda_veh_p_hour(self, veh_p_h):
         return 3600 / veh_p_h
@@ -437,6 +482,13 @@ class SumoEnv:
     def insert_lambdas(self):
         lambdas = [self.lambda_veh_p_hour(random.randint(1, 10) * 100) for _ in self.flow_logic]
         return lambdas if self.rnd[1] else [self.lambda_veh_p_hour(f) for f in self.args["veh_p_hour"]]
+    def insert_lambdas_from_rouxml(self):
+        veh_p_hour = self.extract_vehs_per_hour()
+        print(veh_p_hour)
+        #lambdas = [self.lambda_veh_p_hour(veh_p_hour[edge]) for edge in self.flow_logic]
+        lambdas = [self.lambda_veh_p_hour(random.randint(1, 10) * 100) for _ in self.flow_logic]
+        return lambdas if self.rnd[1] else [self.lambda_veh_p_hour(f) for f in veh_p_hour.values()]
+    
 
     def update_flow_logic(self):
         self.set_seed()
@@ -445,9 +497,11 @@ class SumoEnv:
         self.con_p_rate = self.con_penetration_rate()
 
         """"""
-        lambdas = self.insert_lambdas()
-        self.veh_n_p_hour = [3600 / l for l in lambdas]
-        print("\n--- con:", self.con_p_rate, ", flow:", self.veh_n_p_hour, "---\n")
+        #lambdas = self.insert_lambdas()
+        lambdas = self.insert_lambdas_from_rouxml() #insert_lambdas_from_rouxml(self.rou_xml_file)
+        #self.veh_n_p_hour = [3600 / l for l in lambdas]
+        #self.veh_n_p_hour = [3600 / l for l in lambdas]
+        print("\n--- VIET con:", self.con_p_rate, ", flow:", self.veh_n_p_hour, "---\n")
         """"""
 
         for i, e in enumerate(sorted([e for e in self.flow_logic])):
